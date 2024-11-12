@@ -1,0 +1,45 @@
+name: nekoswap_runes Image Build And Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.get-commit-sha.outputs.sha }}
+      ecr_registry: ${{ steps.login-ecr.outputs.registry }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Get short SHA
+        id: get-commit-sha
+        run: echo "::set-output name=sha::$(git rev-parse --short=7 HEAD)"
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_ALIL_USERNAME }}
+          password: ${{ secrets.DOCKER_ALIL_PASSWORD }}
+          registry: "registry.cn-hongkong.aliyuncs.com"
+
+      - name: Build and push Docker image
+        env:
+          COMMIT_SHA: ${{ steps.get-commit-sha.outputs.sha }}
+
+        run: |
+          IMAGE_URL="registry.cn-hongkong.aliyuncs.com/omni-new/dolphin-backend:${COMMIT_SHA}"
+          echo $IMAGE_URL
+          docker build -t ${IMAGE_URL} -f dockerfile .
+          docker push ${IMAGE_URL}
+      - name: Update Deploy Version
+        run: |
+          sed -i 's/{{IMAGE_VERSION}}/${{ steps.get-commit-sha.outputs.sha }}/g' apply_testnet.yaml
+
+      - name: Deploy to k3s
+        uses: steebchen/kubectl@master
+        with:
+          config: ${{ secrets.OMNI_KUBE }}
+          command: apply -f apply_testnet.yaml --force
